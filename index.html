@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>ナース vs ゾンビ</title>
+<meta name="theme-color" content="#16232b">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ナースゾンビ">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<style>
+:root{--bg:#16232b;--ground:#22343d;--ink:#eef3f1;--accent:#e5484d;--ring:#ffd166;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#16232b}}
+:root[data-theme="dark"]{--bg:#16232b}
+html,body{height:100%;margin:0;background:var(--bg);overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;font-family:"Hiragino Sans","Noto Sans JP",sans-serif}
+canvas{display:block;width:100%;height:100%}
+#hud{position:fixed;left:0;right:0;top:env(safe-area-inset-top,0px);display:flex;justify-content:space-between;padding:10px 16px;color:var(--ink);font-size:20px;font-weight:700;pointer-events:none}
+#hp{color:var(--accent);letter-spacing:2px}
+#msg{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--ink);text-align:center;background:rgba(10,18,23,.72);padding:24px}
+#msg h1{margin:0;font-size:30px}
+#msg p{margin:0;font-size:16px;line-height:1.7;max-width:20em}
+#msg b{font-size:18px;color:var(--ring)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><span id="score">0体</span><span id="hp"></span></div>
+<button id="mute" aria-label="音のオン・オフ">🔊</button>
+<style>#mute{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 8px);z-index:5;font-size:20px;background:rgba(255,255,255,.12);border:0;border-radius:20px;padding:4px 12px;color:var(--ink)}</style>
+<div id="msg"><h1>ナース vs ゾンビ</h1><p>ゾンビをタップすると、ナースがその正面まで移動して注射器を投げます。病院を守りきろう。</p><b>タップしてスタート</b></div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const msg=document.getElementById('msg'),scoreEl=document.getElementById('score'),hpEl=document.getElementById('hp');
+let W,H,dpr,cx,cy,maxD;
+function resize(){dpr=window.devicePixelRatio||1;W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);cx=W/2;cy=H-70;maxD=Math.hypot(W/2,cy)+40}
+addEventListener('resize',resize);resize();
+let AC=null,master=null,bgmTimer=null,bgmNext=0,bgmStep=0,muted=false;
+function initAudio(){if(AC)return;try{AC=new (window.AudioContext||window.webkitAudioContext)();master=AC.createGain();master.gain.value=muted?0:.5;master.connect(AC.destination)}catch(e){AC=null}}
+function tone(f,t0,dur,type,vol,f2){if(!AC)return;const o=AC.createOscillator(),g=AC.createGain();o.type=type;o.frequency.setValueAtTime(f,t0);if(f2)o.frequency.exponentialRampToValueAtTime(f2,t0+dur);g.gain.setValueAtTime(vol,t0);g.gain.exponentialRampToValueAtTime(.001,t0+dur);o.connect(g);g.connect(master);o.start(t0);o.stop(t0+dur+.05)}
+function noise(t0,dur,vol){if(!AC)return;const n=Math.floor(AC.sampleRate*dur),b=AC.createBuffer(1,n,AC.sampleRate),d=b.getChannelData(0);for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);const s=AC.createBufferSource(),g=AC.createGain();s.buffer=b;g.gain.value=vol;s.connect(g);g.connect(master);s.start(t0)}
+const sfx={
+kill(){const t=AC.currentTime;tone(760,t,.16,'square',.16,180);tone(120,t,.2,'sine',.3,60);noise(t,.1,.12)},
+slow(){const t=AC.currentTime;tone(320,t,.14,'triangle',.25,140);noise(t,.06,.1)},
+hurt(){const t=AC.currentTime;tone(170,t,.5,'sawtooth',.28,45);tone(90,t,.5,'sine',.35,40);noise(t,.3,.2)},
+start(){const t=AC.currentTime;[330,392,494,659].forEach((f,i)=>tone(f,t+i*.09,.3,'triangle',.2))},
+over(){const t=AC.currentTime;[392,330,262,196].forEach((f,i)=>tone(f,t+i*.38,.7,'sawtooth',.14,f*.96))}};
+function play(n){if(AC&&!muted)sfx[n]()}
+const BASS=[55,0,55,0,65.4,0,55,0,49,49,0,49,58.3,0,55,0],EERIE=[659,622,523,494];
+function sched(){if(!AC||st!=='play')return;while(bgmNext<AC.currentTime+.3){const s=bgmStep%16,dur=Math.max(.26,.38-score*.0015);
+if(BASS[s])tone(BASS[s],bgmNext,dur*1.8,'triangle',.3);
+if(s===0)tone(110,bgmNext,dur*7,'sawtooth',.04);
+if(s===8)tone(EERIE[(bgmStep>>4)%4],bgmNext,dur*6,'sine',.07);
+if(s%4===2)noise(bgmNext,.04,.025);
+bgmNext+=dur;bgmStep++}}
+function startBgm(){bgmNext=AC.currentTime+.15;bgmStep=0;if(!bgmTimer)bgmTimer=setInterval(sched,100)}
+document.addEventListener('visibilitychange',()=>{if(!AC)return;document.hidden?AC.suspend():AC.resume()});
+const muteBtn=document.getElementById('mute');
+muteBtn.addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();muted=!muted;muteBtn.textContent=muted?'🔇':'🔊';if(master)master.gain.value=muted?0:.5});
+const NR=64, NSPEED=2.4, PI=Math.PI;
+let st='ready',zs,sy,nurse,score,hp,t,spawnT,target,cool,last;
+function reset(){zs=[];sy=[];nurse={a:PI/2};score=0;hp=5;t=0;spawnT=0.5;target=null;cool=0;ui()}
+function ui(){scoreEl.textContent=score+'体';hpEl.textContent='♥'.repeat(hp)}
+function pos(a,d){return{x:cx+d*Math.cos(a),y:cy-d*Math.sin(a)}}
+function spawn(){const hi=score>=20&&Math.random()<Math.min(0.5,0.08+(score-20)*0.02);
+const a=0.05+Math.random()*(PI-0.1),sp=38+Math.min(t*0.9,60)+Math.random()*14;
+zs.push({a,d:maxD,sp:hi?sp*1.1:sp,dr:(Math.random()-.5)*0.24,hi,hp:hi?2:1})}
+function tap(x,y){
+if(st!=='play'){if(st==='ready'||st==='over'){initAudio();if(AC){AC.resume();play('start');startBgm()}reset();st='play';msg.style.display='none';last=performance.now()}return}
+let best=null,bd=48;for(const z of zs){const p=pos(z.a,z.d),d=Math.hypot(p.x-x,p.y-y);if(d<bd){bd=d;best=z}}
+if(best)target=best}
+cv.addEventListener('pointerdown',e=>{e.preventDefault();tap(e.clientX,e.clientY)});
+msg.addEventListener('pointerdown',e=>{e.preventDefault();tap(0,0)});
+function update(dt){
+t+=dt;spawnT-=dt;
+if(spawnT<=0){spawn();spawnT=Math.max(0.55,1.7-t*0.018)*(0.7+Math.random()*0.6)}
+for(const z of zs){z.d-=z.sp*dt;z.a+=z.dr*dt;if(z.a<0.03||z.a>PI-0.03){z.dr=-z.dr;z.a=Math.min(PI-0.03,Math.max(0.03,z.a))}}
+cool-=dt;
+if(target&&!zs.includes(target))target=null;
+if(target){const diff=target.a-nurse.a,step=NSPEED*dt;
+if(Math.abs(diff)<=step)nurse.a=target.a;else nurse.a+=Math.sign(diff)*step;
+if(Math.abs(target.a-nurse.a)<0.035&&cool<=0){const p=pos(nurse.a,NR);sy.push({x:p.x,y:p.y,vx:Math.cos(nurse.a)*720,vy:-Math.sin(nurse.a)*720});cool=0.3;target=null}}
+for(const s of sy){s.x+=s.vx*dt;s.y+=s.vy*dt;s.dead=s.x<-30||s.x>W+30||s.y<-30||s.y>H+30;
+if(!s.dead)for(const z of zs){const p=pos(z.a,z.d);if(Math.hypot(p.x-s.x,p.y-s.y)<24){s.dead=true;z.hp--;if(z.hp<=0){z.dead=true;score++;ui();play('kill')}else{z.sp*=0.45;z.hit=true;play('slow')}break}}}
+sy=sy.filter(s=>!s.dead);
+for(const z of zs){if(!z.dead&&z.d<34){z.dead=true;hp--;ui();if(hp>0)play('hurt')}}
+zs=zs.filter(z=>!z.dead);
+if(hp<=0){st='over';play('hurt');play('over');msg.style.display='flex';msg.innerHTML='<h1>病院が陥落…</h1><p>倒したゾンビ：'+score+'体</p><b>タップでもう一度</b>'}}
+function emo(s,x,y,size,rot){ctx.save();ctx.translate(x,y);if(rot)ctx.rotate(rot);ctx.font=size+'px serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(s,0,0);ctx.restore()}
+function draw(){
+ctx.clearRect(0,0,W,H);
+ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--ground');
+ctx.beginPath();ctx.arc(cx,cy,NR+36,PI,2*PI);ctx.fill();ctx.fillRect(0,cy,W,H-cy);
+ctx.strokeStyle='rgba(255,255,255,.18)';ctx.setLineDash([6,8]);ctx.lineWidth=2;
+ctx.beginPath();ctx.arc(cx,cy,NR,PI,2*PI);ctx.stroke();ctx.setLineDash([]);
+emo('🏥',cx,cy+4,54);
+if(target&&zs.includes(target)){const n=pos(nurse.a,NR),p=pos(target.a,target.d);
+ctx.strokeStyle='rgba(255,209,102,.35)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(n.x,n.y);ctx.lineTo(p.x,p.y);ctx.stroke()}
+for(const z of zs){const p=pos(z.a,z.d);
+if(z.hi){ctx.fillStyle=z.hit?'rgba(120,120,255,.45)':'rgba(229,72,77,.5)';ctx.beginPath();ctx.arc(p.x,p.y,32,0,2*PI);ctx.fill();emo(z.hit?'🥴':'👹',p.x,p.y,50)}
+else emo('🧟',p.x,p.y,40);
+if(z===target){ctx.strokeStyle='#ffd166';ctx.lineWidth=3;ctx.beginPath();ctx.arc(p.x,p.y,28,0,2*PI);ctx.stroke()}}
+const n=pos(nurse.a,NR);
+ctx.fillStyle='#ffb3c7';ctx.beginPath();ctx.arc(n.x,n.y+2,25,0,2*PI);ctx.fill();
+emo('👧',n.x,n.y+3,38);
+ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(n.x-14,n.y-12);ctx.lineTo(n.x-10,n.y-26);ctx.lineTo(n.x+10,n.y-26);ctx.lineTo(n.x+14,n.y-12);ctx.closePath();ctx.fill();
+ctx.fillStyle='#e5484d';ctx.fillRect(n.x-2,n.y-23,4,10);ctx.fillRect(n.x-5,n.y-20,10,4);
+for(const s of sy)emo('💉',s.x,s.y,28,Math.atan2(s.vy,s.vx)-PI*0.75)}
+function loop(now){
+if(st==='play'){const dt=Math.min(0.05,(now-last)/1000);last=now;update(dt)}
+draw();requestAnimationFrame(loop)}
+reset();requestAnimationFrame(loop);
+if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
+</script>
+</body>
+</html>
